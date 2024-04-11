@@ -1,0 +1,1 @@
+# AlignHelper - a Plugin for align atoms in VaM
