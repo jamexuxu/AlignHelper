@@ -1,5 +1,6 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
 namespace noone77521
@@ -13,7 +14,7 @@ namespace noone77521
     /// </summary>
     internal partial class AlignHelper : MVRScript
     {
-        private const string _version = "1.12";
+        private const string _version = "1.20";
 
         /// <summary>
         /// 默认空字符串
@@ -36,6 +37,11 @@ namespace noone77521
         /// 锁定
         /// </summary>
         private JSONStorableBool _locked;
+
+        /// <summary>
+        /// 锁定时逐帧更新
+        /// </summary>
+        private JSONStorableStringChooser _updateModeWhenLockedChooser;
 
         /// <summary>
         /// 对齐位置X
@@ -105,6 +111,7 @@ namespace noone77521
         private JSONStorableBool _reverseJSON;
 
         List<UIDynamic> _fixUIList = new List<UIDynamic>();
+        List<UIDynamic> _lockTipList = new List<UIDynamic>();
 
         readonly string _screenAreaName = "Monitor Screen";
 
@@ -121,21 +128,20 @@ namespace noone77521
             "BottomRight",
         };
 
-        #endregion
-
         /// <summary>
-        /// 刷新对齐原子列表
+        /// Update mode when locked
         /// </summary>
-        internal void RefreshAlignAtomList()
-        {
-            MakeAlignAtomList();
-        }
+        readonly List<string> _updateModes = new List<string> { "Update", "FixUpdate" };
+
+        #endregion
 
         /// <summary>
         /// 生成对齐原子列表
         /// </summary>
         void MakeAlignAtomList()
         {
+            if (_alignAtomJSON == null) return;
+
             List<string> targetChoices = new List<string>() { _noneString, _screenAreaName };
             var atomUIDs = GetAtomUIDs();
             foreach (string atomUID in atomUIDs)
@@ -210,6 +216,8 @@ namespace noone77521
         }
         public override void Init()
         {
+            base.Init();
+
             _containingAtom = containingAtom;
 
             var alignNow = new JSONStorableAction("Align Now", AlignNow);
@@ -255,8 +263,14 @@ namespace noone77521
             CreateUISpacer(rightSide: R_SIDE);
 
             _locked = new JSONStorableBool("Lock", false);
+            _locked.setCallbackFunction = v => { ShowUIList(_lockTipList, v); };
             RegisterBool(_locked);
             CreateToggle(_locked, R_SIDE);
+
+            _updateModeWhenLockedChooser = new JSONStorableStringChooser("Update Mode When Locked", _updateModes, _updateModes.Last(), "Update Mode");
+            RegisterStringChooser(_updateModeWhenLockedChooser);
+            var updateModePopup = CreatePopup(_updateModeWhenLockedChooser, R_SIDE);
+            _lockTipList.Add(updateModePopup);
 
             CreateUISpacer(50f, R_SIDE);
 
@@ -274,9 +288,6 @@ namespace noone77521
             _alignReceiverJSON = new JSONStorableStringChooser("Target Receiver", _noneStrings, _noneString, "Target Receiver");
             CreateScrollablePopup(_alignReceiverJSON, L_SIDE);
             RegisterStringChooser(_alignReceiverJSON);
-
-            // 生成对齐原子列表
-            MakeAlignAtomList();
 
             _horizontalOffsetJSON = new JSONStorableFloat("Horizontal Offset", 0f, -1000f, 1000f, false);
             _verticalOffsetJSON = new JSONStorableFloat("Vertical Offset", 0f, -1000f, 1000f, false);
@@ -331,13 +342,9 @@ namespace noone77521
             SuperController.singleton.onAtomAddedHandlers = (a) => MakeAlignAtomList();
             SuperController.singleton.onAtomRemovedHandlers = (a) => MakeAlignAtomList();
             SuperController.singleton.onAtomUIDRenameHandlers = (a, b) => MakeAlignAtomList();
-
-            SuperController.singleton.BroadcastMessage("OnActionsProviderAvailable", this, SendMessageOptions.DontRequireReceiver);
+            SuperController.singleton.onAtomUIDsChangedHandlers = (a) => MakeAlignAtomList();
 
             StartCoroutine(InitDeferred());
-
-            if (enabled)
-                OnEnable();
         }
 
         /// <summary>
@@ -353,8 +360,12 @@ namespace noone77521
             return spacer;
         }
 
-        public void Start()
+        protected void Start()
         {
+            MakeAlignAtomList();
+
+            ShowUIList(_lockTipList, _locked.val);
+
             ShowScreenPointFixUI(_alignAtomJSON.val == _screenAreaName);
         }
 
@@ -371,9 +382,17 @@ namespace noone77521
             }
         }
 
-        public void FixedUpdate()
+        protected void FixedUpdate()
         {
-            if (enabled && _locked.val)
+            if (enabled && _locked.val && _updateModeWhenLockedChooser.val == "FixedUpdate")
+            {
+                AlignNow();
+            }
+        }
+
+        protected void Update()
+        {
+            if (enabled && _locked.val && _updateModeWhenLockedChooser.val != "FixedUpdate")
             {
                 AlignNow();
             }
@@ -385,14 +404,6 @@ namespace noone77521
             if (!enabled) yield break;
             yield return 0;
             if (!enabled) yield break;
-        }
-
-        private void OnEnable()
-        {
-        }
-
-        private void OnDisable()
-        {
         }
 
         private void AlignNow()
@@ -591,14 +602,18 @@ namespace noone77521
             }
         }
 
-        public void OnBindingsListRequested(List<object> bindings)
+        protected void OnEnable()
         {
-            bindings.Add(new JSONStorableAction("Align", AlignNow));
+            // 生成对齐原子列表
+            MakeAlignAtomList();
         }
 
-        public void OnDestroy()
+        protected void OnDisable()
         {
-            SuperController.singleton.BroadcastMessage("OnActionsProviderDestroyed", this, SendMessageOptions.DontRequireReceiver);
+        }
+
+        protected void OnDestroy()
+        {
         }
     }
 }
